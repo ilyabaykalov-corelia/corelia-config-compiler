@@ -1,0 +1,91 @@
+package ru.corelia.configuration;
+
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.*;
+
+/** Build-time packaging of a validated contract, exact operations and explicit privilege metadata. */
+public final class ConfigurationCompiler {
+    private static final JsonMapper JSON = JsonMapper.builder()
+        .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
+    public static void main(String[] args) throws IOException {
+        if (args.length != 3) throw new IllegalArgumentException("Usage: ConfigurationCompiler SOURCE OUTPUT CORELIA_VERSION");
+        compile(Path.of(args[0]), Path.of(args[1]), args[2]);
+    }
+    public static void compile(Path source, Path output, String version) throws IOException {
+        source = source.toRealPath();
+        Path parent = output.toAbsolutePath().normalize().getParent().toRealPath();
+        output = parent.resolve(output.getFileName());
+        if (Files.exists(output)) throw new ConfigurationException("Output must not exist; compile into a new release directory");
+        if (output.startsWith(source)) throw new ConfigurationException("Output must be outside the source package");
+        var loaded = new ConfigurationLoader().load(source, version);
+        Path permissionFile = source.resolve("operation-permissions.json").toRealPath();
+        if (!permissionFile.startsWith(source)) throw new ConfigurationException("Permissions escape source package");
+        JsonNode permissionSource = JSON.readTree(Files.readString(permissionFile));
+        if (permissionSource == null || !permissionSource.isArray()) throw new ConfigurationException("operation-permissions.json must be an array");
+        var permissions = JSON.createArrayNode();
+        var remaining = new HashSet<>(loaded.operations().keySet());
+        for (JsonNode permission : permissionSource) {
+            if (!permission.isObject()) throw new ConfigurationException("Invalid permission");
+            AttributeSchema.keywords(permission, Set.of("name", "checkForAnyPrivilege", "checkSelects", "allowEmptyChecks", "disableJwtVerification"), "permission");
+            for (String flag : List.of("allowEmptyChecks", "disableJwtVerification"))
+                if (permission.has(flag) && !permission.path(flag).isBoolean()) throw new ConfigurationException("Invalid permission flag: " + flag);
+            if (permission.has("checkSelects")) {
+                if (!permission.path("checkSelects").isArray()) throw new ConfigurationException("Invalid checkSelects");
+                for (JsonNode check : permission.path("checkSelects")) {
+                    if (!check.isObject()) throw new ConfigurationException("Invalid checkSelect");
+                    AttributeSchema.keywords(check, Set.of("conditionValue", "orderValue", "typeName", "description"), "checkSelect");
+                    for (String key : List.of("conditionValue", "orderValue", "typeName")) DocumentTypeDefinition.requiredText(check, key);
+                }
+            }
+            String name = DocumentTypeDefinition.requiredText(permission, "name");
+            if (!remaining.remove(name)) throw new ConfigurationException("Unknown or duplicate permission operation: " + name);
+            JsonNode privileges = permission.path("checkForAnyPrivilege");
+            if (!privileges.isArray() || privileges.isEmpty()) throw new ConfigurationException("Explicit privileges required: " + name);
+            for (JsonNode privilege : privileges) if (!privilege.isTextual() || privilege.asString().isBlank()) throw new ConfigurationException("Invalid privilege: " + name);
+            ObjectNode compiled = (ObjectNode) permission.deepCopy();
+            compiled.put("body", loaded.operations().get(name).text());
+            permissions.add(compiled);
+        }
+        if (!remaining.isEmpty()) throw new ConfigurationException("Missing privilege metadata for operations: " + remaining);
+        Path staging = Files.createTempDirectory(parent, ".corelia-config-");
+        try {
+            Path runtime = Files.createDirectories(staging.resolve("corelia"));
+            Files.createDirectories(runtime.resolve("graphql"));
+            ObjectNode config = (ObjectNode) JSON.readTree(Files.readString(source.resolve("configuration.json")));
+            var hashes = JSON.createObjectNode();
+            for (var entry : loaded.operations().entrySet()) {
+                String relative = "graphql/" + entry.getKey() + ".graphql";
+                ((ObjectNode) config.path("operations").path(entry.getKey())).put("file", relative);
+                Files.writeString(runtime.resolve(relative), entry.getValue().text());
+                hashes.put(entry.getKey(), sha256(entry.getValue().text()));
+            }
+            Files.writeString(runtime.resolve("configuration.json"), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(config));
+            Files.createDirectories(staging.resolve("platform-v"));
+            Files.createDirectories(staging.resolve("tests"));
+            String serialized = JSON.writerWithDefaultPrettyPrinter().writeValueAsString(permissions);
+            Files.writeString(staging.resolve("platform-v/graphql-permissions.fragment.json"), serialized);
+            Files.writeString(staging.resolve("tests/allowed-requests.json"), serialized);
+            var manifest = JSON.createObjectNode().put("schemaVersion", 1).put("coreliaVersion", version);
+            manifest.set("operationSha256", hashes);
+            manifest.put("configurationSha256", sha256(Files.readString(runtime.resolve("configuration.json"))));
+            Files.writeString(staging.resolve("manifest.json"), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(manifest));
+            new ConfigurationLoader().load(runtime, version);
+            Files.move(staging, output, StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            if (Files.exists(staging)) try (var paths = Files.walk(staging)) {
+                for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
+            }
+        }
+    }
+    private static String sha256(String value) {
+        try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
+        catch (NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+    }
+}
