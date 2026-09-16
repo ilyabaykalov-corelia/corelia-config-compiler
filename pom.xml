@@ -3,6 +3,7 @@
   <parent><groupId>ru.corelia</groupId><artifactId>corelia-parent</artifactId><version>0.1.0</version></parent>
   <artifactId>corelia-config-compiler</artifactId>
   <dependencies>
+    <dependency><groupId>ru.corelia</groupId><artifactId>corelia-platform-v</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>ru.corelia</groupId><artifactId>corelia-configuration</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
   </dependencies>

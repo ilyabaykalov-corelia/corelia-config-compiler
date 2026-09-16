@@ -15,16 +15,19 @@ public final class ConfigurationCompiler {
     private static final JsonMapper JSON = JsonMapper.builder()
         .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
     public static void main(String[] args) throws IOException {
-        if (args.length != 3) throw new IllegalArgumentException("Usage: ConfigurationCompiler SOURCE OUTPUT CORELIA_VERSION");
-        compile(Path.of(args[0]), Path.of(args[1]), args[2]);
+        if (args.length != 4) throw new IllegalArgumentException("Usage: ConfigurationCompiler SOURCE OUTPUT CORELIA_VERSION PLATFORM_AC_FILE");
+        compile(Path.of(args[0]), Path.of(args[1]), args[2], Path.of(args[3]));
     }
-    public static void compile(Path source, Path output, String version) throws IOException {
+    public static void compile(Path source, Path output, String version, Path accessControl) throws IOException {
         source = source.toRealPath();
         Path parent = output.toAbsolutePath().normalize().getParent().toRealPath();
         output = parent.resolve(output.getFileName());
         if (Files.exists(output)) throw new ConfigurationException("Output must not exist; compile into a new release directory");
         if (output.startsWith(source)) throw new ConfigurationException("Output must be outside the source package");
         var loaded = new ConfigurationLoader().load(source, version);
+        accessControl = accessControl.toRealPath();
+        String accessText = Files.readString(accessControl);
+        ru.corelia.integration.PlatformVPermissionChecker.fromText(accessText, loaded);
         Path permissionFile = source.resolve("operation-permissions.json").toRealPath();
         if (!permissionFile.startsWith(source)) throw new ConfigurationException("Permissions escape source package");
         JsonNode permissionSource = JSON.readTree(Files.readString(permissionFile));
@@ -58,6 +61,7 @@ public final class ConfigurationCompiler {
         try {
             Path runtime = Files.createDirectories(staging.resolve("corelia"));
             Files.createDirectories(runtime.resolve("graphql"));
+            Files.writeString(runtime.resolve("platform-v-ac.json"), accessText);
             ObjectNode config = (ObjectNode) JSON.readTree(Files.readString(source.resolve("configuration.json")));
             var hashes = JSON.createObjectNode();
             for (var entry : loaded.operations().entrySet()) {
@@ -68,12 +72,14 @@ public final class ConfigurationCompiler {
             }
             Files.writeString(runtime.resolve("configuration.json"), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(config));
             Files.createDirectories(staging.resolve("platform-v"));
+            Files.writeString(staging.resolve("platform-v/ac.json"), accessText);
             Files.createDirectories(staging.resolve("tests"));
             String serialized = JSON.writerWithDefaultPrettyPrinter().writeValueAsString(permissions);
             Files.writeString(staging.resolve("platform-v/graphql-permissions.fragment.json"), serialized);
             Files.writeString(staging.resolve("tests/allowed-requests.json"), serialized);
             var manifest = JSON.createObjectNode().put("schemaVersion", 1).put("coreliaVersion", version);
             manifest.set("operationSha256", hashes);
+            manifest.put("accessControlSha256", sha256(accessText));
             manifest.put("configurationSha256", sha256(Files.readString(runtime.resolve("configuration.json"))));
             Files.writeString(staging.resolve("manifest.json"), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(manifest));
             new ConfigurationLoader().load(runtime, version);
