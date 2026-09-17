@@ -62,7 +62,7 @@ public final class ConfigurationCompiler {
             Path runtime = Files.createDirectories(staging.resolve("corelia"));
             Files.createDirectories(runtime.resolve("graphql"));
             Files.writeString(runtime.resolve("platform-v-ac.json"), accessText);
-            ObjectNode config = (ObjectNode) JSON.readTree(Files.readString(source.resolve("configuration.json")));
+            ObjectNode config = (ObjectNode) loaded.normalizedConfiguration();
             var hashes = JSON.createObjectNode();
             for (var entry : loaded.operations().entrySet()) {
                 String relative = "graphql/" + entry.getKey() + ".graphql";
