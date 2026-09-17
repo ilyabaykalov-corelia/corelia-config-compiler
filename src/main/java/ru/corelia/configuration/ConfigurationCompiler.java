@@ -60,15 +60,34 @@ public final class ConfigurationCompiler {
         Path staging = Files.createTempDirectory(parent, ".corelia-config-");
         try {
             Path runtime = Files.createDirectories(staging.resolve("corelia"));
-            Files.createDirectories(runtime.resolve("graphql"));
             Files.writeString(runtime.resolve("platform-v-ac.json"), accessText);
-            ObjectNode config = (ObjectNode) JSON.readTree(Files.readString(source.resolve("configuration.json")));
+            ObjectNode config = JSON.createObjectNode().put("schemaVersion", 2);
+            config.putObject("compatibility").put("corelia", ">=0.1.0 <1.0.0");
+            var sources = config.putObject("sources");
+            sources.put("entities", "data-model/entities"); sources.put("ui", "ui"); sources.put("operations", "operations"); sources.put("permissions", "permissions");
+            Path graphql = Files.createDirectories(runtime.resolve("graphql"));
+            Path operations = Files.createDirectories(runtime.resolve("operations"));
+            Path entities = Files.createDirectories(runtime.resolve("data-model/entities"));
+            Path ui = Files.createDirectories(runtime.resolve("ui"));
+            Path authorization = Files.createDirectories(runtime.resolve("permissions"));
             var hashes = JSON.createObjectNode();
             for (var entry : loaded.operations().entrySet()) {
                 String relative = "graphql/" + entry.getKey() + ".graphql";
-                ((ObjectNode) config.path("operations").path(entry.getKey())).put("file", relative);
-                Files.writeString(runtime.resolve(relative), entry.getValue().text());
+                Files.writeString(graphql.resolve(entry.getKey() + ".graphql"), entry.getValue().text());
+                String filename = kebab(entry.getKey()) + ".json";
+                ObjectNode operation = JSON.createObjectNode().put("id", entry.getKey()).put("file", "../" + relative).put("multiaggregate", entry.getValue().multiaggregate());
+                Files.writeString(operations.resolve(filename), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(operation));
                 hashes.put(entry.getKey(), sha256(entry.getValue().text()));
+            }
+            for (DocumentTypeDefinition definition : loaded.documentTypes().all()) {
+                String filename = kebab(definition.id()) + ".json";
+                ObjectNode entity = (ObjectNode) definition.definition();
+                entity.remove("ui"); entity.remove("authorization");
+                Files.writeString(entities.resolve(filename), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(entity));
+                ObjectNode uiFragment = JSON.createObjectNode().put("id", definition.id()); uiFragment.set("ui", definition.ui());
+                Files.writeString(ui.resolve(filename), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(uiFragment));
+                ObjectNode permissionFragment = JSON.createObjectNode().put("id", definition.id()); permissionFragment.set("authorization", definition.authorization());
+                Files.writeString(authorization.resolve(filename), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(permissionFragment));
             }
             Files.writeString(runtime.resolve("configuration.json"), JSON.writerWithDefaultPrettyPrinter().writeValueAsString(config));
             Files.createDirectories(staging.resolve("platform-v"));
@@ -94,4 +113,5 @@ public final class ConfigurationCompiler {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
         catch (NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
     }
+    private static String kebab(String id) { return id.replaceAll("([a-z0-9])([A-Z])", "$1-$2").replace('_', '-').toLowerCase(java.util.Locale.ROOT); }
 }
