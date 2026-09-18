@@ -62,7 +62,11 @@ public final class ConfigurationCompiler {
             Path runtime = Files.createDirectories(staging.resolve("corelia"));
             Files.writeString(runtime.resolve("platform-v-ac.json"), accessText);
             ObjectNode config = JSON.createObjectNode().put("schemaVersion", 2);
-            config.putObject("compatibility").put("corelia", ">=0.1.0 <1.0.0");
+            config.set(
+                    "compatibility",
+                    JSON.readTree(Files.readString(source.resolve("configuration.json")))
+                            .path("compatibility")
+                            .deepCopy());
             var sources = config.putObject("sources");
             sources.put("entities", "data-model/entities"); sources.put("ui", "ui"); sources.put("operations", "operations"); sources.put("permissions", "permissions");
             Path graphql = Files.createDirectories(runtime.resolve("graphql"));
