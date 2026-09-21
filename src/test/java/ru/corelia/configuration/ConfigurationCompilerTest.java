@@ -15,6 +15,9 @@ class ConfigurationCompilerTest {
         assertEquals(Files.readString(Path.of("../../sber-npf-platform-v/ac.json")), Files.readString(output.resolve("corelia/platform-v-ac.json")));
         assertEquals(Files.readString(output.resolve("corelia/platform-v-ac.json")), Files.readString(output.resolve("platform-v/ac.json")));
         var loaded = new ConfigurationLoader().load(output.resolve("corelia"), "0.1.0");
+        assertEquals(
+                JsonMapper.builder().build().readTree(Files.readString(source.resolve("configuration.json"))).path("compatibility"),
+                JsonMapper.builder().build().readTree(Files.readString(output.resolve("corelia/configuration.json"))).path("compatibility"));
         var json = JsonMapper.builder().build();
         var permissions = json.readTree(Files.readString(output.resolve("platform-v/graphql-permissions.fragment.json")));
         var original = json.readTree(Files.readString(Path.of("../../sber-npf-platform-v/model.graphql-permissions.json")));
