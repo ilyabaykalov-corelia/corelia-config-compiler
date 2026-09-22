@@ -25,6 +25,7 @@ public final class ConfigurationCompiler {
         if (Files.exists(output)) throw new ConfigurationException("Output must not exist; compile into a new release directory");
         if (output.startsWith(source)) throw new ConfigurationException("Output must be outside the source package");
         var loaded = new ConfigurationLoader().load(source, version);
+        var operationsCatalog = ru.corelia.platformv.PlatformVOperationCatalog.load(source);
         accessControl = accessControl.toRealPath();
         String accessText = Files.readString(accessControl);
         ru.corelia.platformv.PlatformVPermissionChecker.fromText(accessText, loaded);
@@ -33,7 +34,7 @@ public final class ConfigurationCompiler {
         JsonNode permissionSource = JSON.readTree(Files.readString(permissionFile));
         if (permissionSource == null || !permissionSource.isArray()) throw new ConfigurationException("operation-permissions.json must be an array");
         var permissions = JSON.createArrayNode();
-        var remaining = new HashSet<>(loaded.operations().keySet());
+        var remaining = new HashSet<>(operationsCatalog.keySet());
         for (JsonNode permission : permissionSource) {
             if (!permission.isObject()) throw new ConfigurationException("Invalid permission");
             AttributeSchema.keywords(permission, Set.of("name", "checkForAnyPrivilege", "checkSelects", "allowEmptyChecks", "disableJwtVerification"), "permission");
@@ -53,7 +54,7 @@ public final class ConfigurationCompiler {
             if (!privileges.isArray() || privileges.isEmpty()) throw new ConfigurationException("Explicit privileges required: " + name);
             for (JsonNode privilege : privileges) if (!privilege.isTextual() || privilege.asString().isBlank()) throw new ConfigurationException("Invalid privilege: " + name);
             ObjectNode compiled = (ObjectNode) permission.deepCopy();
-            compiled.put("body", loaded.operations().get(name).text());
+            compiled.put("body", operationsCatalog.get(name).text());
             permissions.add(compiled);
         }
         if (!remaining.isEmpty()) throw new ConfigurationException("Missing privilege metadata for operations: " + remaining);
@@ -75,7 +76,7 @@ public final class ConfigurationCompiler {
             Path ui = Files.createDirectories(runtime.resolve("ui"));
             Path authorization = Files.createDirectories(runtime.resolve("permissions"));
             var hashes = JSON.createObjectNode();
-            for (var entry : loaded.operations().entrySet()) {
+            for (var entry : operationsCatalog.entrySet()) {
                 String relative = "graphql/" + entry.getKey() + ".graphql";
                 Files.writeString(graphql.resolve(entry.getKey() + ".graphql"), entry.getValue().text());
                 String filename = kebab(entry.getKey()) + ".json";
