@@ -27,7 +27,7 @@ public final class ConfigurationCompiler {
         var loaded = new ConfigurationLoader().load(source, version);
         accessControl = accessControl.toRealPath();
         String accessText = Files.readString(accessControl);
-        ru.corelia.integration.PlatformVPermissionChecker.fromText(accessText, loaded);
+        ru.corelia.platformv.PlatformVPermissionChecker.fromText(accessText, loaded);
         Path permissionFile = source.resolve("operation-permissions.json").toRealPath();
         if (!permissionFile.startsWith(source)) throw new ConfigurationException("Permissions escape source package");
         JsonNode permissionSource = JSON.readTree(Files.readString(permissionFile));
